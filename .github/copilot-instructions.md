@@ -106,47 +106,6 @@ Each component follows a consistent layout:
 
 > Some newer components use `pyproject.toml` + `uv.lock` instead of `requirements.txt`. Prefer `uv` for lock-file-based installs in those components.
 
-## Build System Patterns
-
-Each component is built independently. There is no monorepo-wide build orchestrator; use per-component Makefiles.
-
-**Standard Makefile targets** (all components):
-
-```bash
-make build        # Build container image
-make lint         # Run linters (pylint, yamllint, etc.)
-make test         # Run test suite (pytest or docker-based)
-make coverage     # Generate coverage report
-make help         # List all available targets
-```
-
-**Container builds** use Docker or Docker Compose. Build scripts are typically in `tests/build.sh` or triggered via `docker compose build`.
-
-**CI workflows** are per-component under `.github/workflows/`:
-- PR workflows: `dlsps-pr-workflow.yaml`, `timeseries-build-pull-request.yml`, `modelregistry-build-pull-request.yaml`, `genai-pre-merge.yaml`
-- Scan workflows: `codeql.yaml`, `trivy-config-mode.yaml`, `zizmor-scan.yaml`, `timeseries-scans.yaml`
-- Weekly/release: `dlsps-package-helm-weekly.yaml`, `siv-weekly-tag.yaml`
-
-## Testing Framework
-
-Tests are co-located within each component under `tests/` (unit + integration) and `tests-functional/` (end-to-end, where present).
-
-**Running tests** (component-specific, from component root):
-
-```bash
-make test                                    # Run test suite via Makefile
-pytest -vv --cov=src --cov-report term-missing   # Direct pytest (model-registry, others)
-docker run --entrypoint <test-script> <image>    # Containerized test runner (dlstreamer-pipeline-server)
-```
-
-**Coverage**: Run `make coverage` or pass `--cov` flags to pytest.
-
-**Test image freshness**: Rebuild container images before running containerized tests after source changes:
-
-```bash
-make build && make test
-```
-
 ## Code Patterns & Conventions
 
 **Python packaging**:
@@ -194,14 +153,6 @@ make lint
 # or directly
 pylint src/
 yamllint .
-```
-
-**Partial clone** (contributing to a single component):
-
-```bash
-git clone --filter=blob:none --sparse https://github.com/open-edge-platform/edge-ai-libraries.git
-cd edge-ai-libraries
-git sparse-checkout add microservices/model-registry
 ```
 
 ## Integration Points & Dependencies
