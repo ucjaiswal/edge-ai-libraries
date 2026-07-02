@@ -4,20 +4,22 @@
 {{- $ovmsVlmUsesGpu := contains "GPU" $ovmsVlmDevice -}}
 {{- $ovmsVlmUsesAccelerator := or (contains "GPU" $ovmsVlmDevice) (contains "NPU" $ovmsVlmDevice) -}}
 {{- $useVllm := .Values.vllm.enabled -}}
+{{- $ovmsChartEnv := .Values.ovms.env -}}
+{{- $ovmsParentEnv := .Values.env -}}
 {{- /* Weight format: use explicit value or auto-detect based on device */ -}}
-{{- $ovmsVlmWeightFormat := default (ternary "int4" "int8" (or (contains "GPU" $ovmsVlmDevice) (contains "NPU" $ovmsVlmDevice))) .Values.ovms.env.VLM_WEIGHT_FORMAT -}}
-{{- $ovmsLlmWeightFormat := default (ternary "int4" "int8" (or (contains "GPU" $ovmsLlmDevice) (contains "NPU" $ovmsLlmDevice))) .Values.ovms.env.LLM_WEIGHT_FORMAT -}}
+{{- $ovmsVlmWeightFormat := default (ternary "int4" "int8" (or (contains "GPU" $ovmsVlmDevice) (contains "NPU" $ovmsVlmDevice))) (default $ovmsChartEnv.VLM_WEIGHT_FORMAT $ovmsParentEnv.VLM_WEIGHT_FORMAT) -}}
+{{- $ovmsLlmWeightFormat := default (ternary "int4" "int8" (or (contains "GPU" $ovmsLlmDevice) (contains "NPU" $ovmsLlmDevice))) (default $ovmsChartEnv.LLM_WEIGHT_FORMAT $ovmsParentEnv.LLM_WEIGHT_FORMAT) -}}
 {{- /* Generate storage model names for OVMS */ -}}
 {{- $vlmSanitized := .Values.global.vlmName | replace "/" "_" | replace ":" "_" | replace " " "_" -}}
 {{- $vlmIsOpenvino := hasPrefix "OpenVINO/" .Values.global.vlmName -}}
 {{- $vlmStorageName := ternary (printf "%s_%s" $vlmSanitized $ovmsVlmDevice) (printf "%s_%s_%s" $vlmSanitized $ovmsVlmDevice $ovmsVlmWeightFormat) $vlmIsOpenvino -}}
-{{- $llmSanitized := .Values.global.llmName | replace "/" "_" | replace ":" "_" | replace " " "_" -}}
-{{- $llmIsOpenvino := hasPrefix "OpenVINO/" .Values.global.llmName -}}
-{{- $llmStorageName := "" -}}
-{{- if and .Values.global.llmName (ne .Values.global.llmName .Values.global.vlmName) -}}
+{{- $effectiveOvmLlmModel := default .Values.global.vlmName .Values.global.llmName -}}
+{{- $llmSanitized := $effectiveOvmLlmModel | replace "/" "_" | replace ":" "_" | replace " " "_" -}}
+{{- $llmIsOpenvino := hasPrefix "OpenVINO/" $effectiveOvmLlmModel -}}
+{{- $ovmsSplitModel := or (ne $effectiveOvmLlmModel .Values.global.vlmName) (ne $ovmsLlmDevice $ovmsVlmDevice) (ne $ovmsLlmWeightFormat $ovmsVlmWeightFormat) -}}
+{{- $llmStorageName := $vlmStorageName -}}
+{{- if $ovmsSplitModel -}}
 {{- $llmStorageName = ternary (printf "%s_%s" $llmSanitized $ovmsLlmDevice) (printf "%s_%s_%s" $llmSanitized $ovmsLlmDevice $ovmsLlmWeightFormat) $llmIsOpenvino -}}
-{{- else -}}
-{{- $llmStorageName = $vlmStorageName -}}
 {{- end -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -109,7 +111,7 @@ spec:
           {{- end }}
           env:
             - name: no_proxy
-              value: "{{ .Values.global.proxy.no_proxy }},audioanalyzer,multimodal-embedding-ms,vdms-dataprep,vdms-vectordb,videosearch,pipelinemanager,videoingestion,minio-server,postgresql,video-summary-nginx,ovms,rabbitmq,{{ .Values.vllm.service.name }},{{ .Values.vllm.service.name }}.{{ .Release.Namespace }}.svc.cluster.local,"
+              value: "{{ .Values.global.proxy.no_proxy }},audioanalyzer,multimodal-embedding-ms,vdms-dataprep,vdms-vectordb,videosearch,pipelinemanager,videoingestion,minio-server,postgresql,video-summary-nginx,ovms,rabbitmq,summary-ui,search-ui,unified-ui,{{ .Values.vllm.service.name }},{{ .Values.vllm.service.name }}.{{ .Release.Namespace }}.svc.cluster.local,"
             - name: http_proxy
               value: "{{ .Values.global.proxy.http_proxy }}"
             - name: https_proxy
@@ -196,6 +198,8 @@ spec:
               value: "{{ .Values.pipelinemanager.env.AUDIO_DEVICE }}"
             - name: AUDIO_USE_FULL_TRANSCRIPT_SUMMARY
               value: "{{ .Values.pipelinemanager.env.AUDIO_USE_FULL_TRANSCRIPT_SUMMARY }}"
+            - name: PRODUCE_FINAL_SUMMARY
+              value: "{{ .Values.pipelinemanager.env.PRODUCE_FINAL_SUMMARY }}"
             - name: OTLP_TRACE_URL
               value: "{{ .Values.global.env.OTLP_ENDPOINT_TRACE }}"
             {{- if and .Values.vdmsdataprep.enabled .Values.vsscollector.enabled }}
@@ -215,6 +219,8 @@ spec:
               value: "http://{{ .Values.videosearch.name }}:{{ .Values.videosearch.service.port }}"
             - name: SEARCH_DATAPREP_ENDPOINT
               value: "http://{{ .Values.vdmsdataprep.name }}:{{ .Values.vdmsdataprep.service.port }}"
+            - name: SEARCH_DATAPREP_TIMEOUT_MS
+              value: "{{ .Values.pipelinemanager.env.SEARCH_DATAPREP_TIMEOUT_MS }}"
             {{- end }}
             - name: USE_VLLM
               value: "{{ .Values.pipelinemanager.env.USE_VLLM }}"

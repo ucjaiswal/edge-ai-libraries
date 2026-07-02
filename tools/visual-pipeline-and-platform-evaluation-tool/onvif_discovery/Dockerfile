@@ -14,7 +14,7 @@
 
 # SPDX-License-Identifier: Apache-2.0
 
-FROM python:3.14.3-slim
+FROM python:3.14.5-slim
 
 WORKDIR /app
 
@@ -31,4 +31,4 @@ ENV OUTPUT_FILE=/out/onvif_cameras.json \
 # Run as non-root user (will be overridden by docker-compose user directive)
 USER 1000:1000
 
-CMD python /app/onvif_discovery_agent.py --out ${OUTPUT_FILE} --interval ${DISCOVERY_INTERVAL}
+CMD ["sh", "-c", "exec python /app/onvif_discovery_agent.py --out \"$OUTPUT_FILE\" --interval \"$DISCOVERY_INTERVAL\""]

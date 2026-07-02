@@ -38,6 +38,7 @@ import { PromptInput } from '../Prompts/PromptInput';
 import { NotificationSeverity, notify } from '../Notification/notify';
 import { getSafePreviewVideoUrl } from '../../utils/util';
 import axios from 'axios';
+import type { MouseEvent } from 'react';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -389,9 +390,9 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
     const title = summaryName || (selectedFile ? selectedFile.name.replace(/\.mp4$/i, '') : '');
 
     const fallbackEvamPipeline =
-      (selectorRef?.current?.value as EVAMPipelines | undefined) ??
-      systemConfig?.meta?.evamPipelines?.[0]?.value ??
+      (selectedEvamPipeline as EVAMPipelines | undefined) ??
       systemConfig?.evamPipeline ??
+      systemConfig?.meta?.evamPipelines?.[0]?.value ??
       EVAMPipelines.OBJECT_DETECTION;
 
     const pipelineData: SummaryPipelineDTO = {
@@ -410,12 +411,13 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
       },
       videoId,
       title,
+      produceFinalSummary,
     };
 
     if (audio && systemConfig?.meta.defaultAudioModel) {
       pipelineData.audio = {
         audioModel: selectedAudioModel || systemConfig.meta.defaultAudioModel,
-        useFullTranscriptSummary: useAudioSummary,
+        useFullTranscriptSummary: produceFinalSummary && useAudioSummary,
       };
     }
 
@@ -463,7 +465,8 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
     }
 
     const base = ASSETS_ENDPOINT.replace(/\/$/, '');
-    return `${base}/${bucket}/${encodedPath}`;
+    const assetVideoUrl = `${base}/${bucket}/${encodedPath}`;
+    return getSafePreviewVideoUrl(assetVideoUrl, ASSETS_ENDPOINT);
   }, []);
 
   const validateAndPrepareSummaryName = () => {
@@ -672,11 +675,13 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
   // Configuration State
   const [chunkDuration, setChunkDuration] = useState(8);
   const [sampleFrame, setSampleFrame] = useState(8);
-  const [frameOverlap, setFrameOverlap] = useState(4);
+  const [frameOverlap, setFrameOverlap] = useState(0);
   const [audio, setAudio] = useState(true);
   const [selectedAudioModel, setSelectedAudioModel] = useState<string>('');
   const [useAudioSummary, setUseAudioSummary] = useState(false);
+  const [produceFinalSummary, setProduceFinalSummary] = useState(true);
   const [systemConfig, setSystemConfig] = useState<SystemConfigWithMeta>();
+  const [selectedEvamPipeline, setSelectedEvamPipeline] = useState<EVAMPipelines | undefined>();
 
   // Prompt State
   const [framePrompt, setFramePrompt] = useState('');
@@ -694,11 +699,14 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoLabelRef = useRef<HTMLInputElement>(null);
-  const selectorRef = useRef<HTMLSelectElement>(null);
   const videoPreviewUrlRef = useRef<string | null>(null);
   const safeVideoPreviewUrl = useMemo(
     () => getSafePreviewVideoUrl(videoPreviewUrl, ASSETS_ENDPOINT),
     [videoPreviewUrl]
+  );
+  const encodedSafeVideoPreviewUrl = useMemo(
+    () => (safeVideoPreviewUrl ? encodeURI(safeVideoPreviewUrl) : null),
+    [safeVideoPreviewUrl]
   );
   const shouldKeepTagsMenuOpenRef = useRef(false);
 
@@ -735,7 +743,7 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
     setSummaryName('');
     setSampleFrame(8);
     setChunkDuration(8);
-    setFrameOverlap(4);
+    setFrameOverlap(0);
     setProgressText('');
     setUploadProgress(0);
     setUploading(false);
@@ -759,6 +767,12 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
         setSystemConfig(res.data);
         setSelectedAudioModel(res.data.meta?.defaultAudioModel ?? '');
         setUseAudioSummary(res.data.audioUseFullTranscriptSummary ?? false);
+        setProduceFinalSummary(res.data.produceFinalSummary ?? true);
+        setSelectedEvamPipeline(
+          (res.data.evamPipeline ??
+            res.data.meta?.evamPipelines?.[0]?.value ??
+            EVAMPipelines.OBJECT_DETECTION) as EVAMPipelines
+        );
       }
     } catch (error) {
       console.error('Failed to load system config:', error);
@@ -1035,7 +1049,7 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
                       <MainButton 
                         kind="tertiary" 
                         style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', margin: '0 auto' }}
-                        onClick={(e) => {
+                        onClick={(e: MouseEvent<HTMLButtonElement>) => {
                           e.stopPropagation();
                           if (videoPreviewUrlRef.current) {
                             URL.revokeObjectURL(videoPreviewUrlRef.current);
@@ -1188,6 +1202,14 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
                   label={createLabelWithTooltip(t('FramePerChunkLabel'), t('FramePerChunkInfo'))}
                   id='sampleFrame'
                 />
+                <Checkbox
+                  id='produceFinalSummaryCheckbox'
+                  labelText={createLabelWithTooltip(t('ProduceFinalSummary'), t('ProduceFinalSummaryInfo'))}
+                  checked={produceFinalSummary}
+                  onChange={(_, { checked }) => {
+                    setProduceFinalSummary(checked);
+                  }}
+                />
                 {systemConfig && (
                   <Accordion align="start">
                     <AccordionItem 
@@ -1215,7 +1237,10 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
                           <Select 
                             id='evam-pipeline-select' 
                             labelText={createLabelWithTooltip(t('Chunking Pipeline'), t('ChunkingPipelineInfo'))} 
-                            ref={selectorRef}
+                            value={selectedEvamPipeline}
+                            onChange={(event: React.ChangeEvent<HTMLSelectElement>) => {
+                              setSelectedEvamPipeline(event.target.value as EVAMPipelines);
+                            }}
                           >
                             {systemConfig.meta.evamPipelines.map((option: { name: string; value: string }) => (
                               <SelectItem key={option.value} text={option.name} value={option.value} />
@@ -1253,9 +1278,15 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
                             <Checkbox
                               id='useAudioSummaryCheckbox'
                               labelText={createLabelWithTooltip(t('UseAudioSummary'), t('UseAudioSummaryInfo'))}
-                              checked={useAudioSummary}
+                              checked={produceFinalSummary ? useAudioSummary : false}
+                              disabled={!produceFinalSummary}
                               onChange={(_, { checked }) => setUseAudioSummary(checked)}
                             />
+                            {!produceFinalSummary && (
+                              <p style={{ fontSize: '0.75rem', color: 'var(--cds-text-helper)', marginTop: '0.25rem', fontStyle: 'italic' }}>
+                                {t('AudioSummaryDisabledHint', { defaultValue: 'Audio transcript summary is not generated when final summary is disabled.' })}
+                              </p>
+                            )}
                           </div>
                         )}
                       </AccordionItem>
@@ -1348,16 +1379,16 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
                   width: '100%'
                 }}>
                   {/* Video Preview inside the details box */}
-                  {safeVideoPreviewUrl && (
+                  {encodedSafeVideoPreviewUrl && (
                     <VideoPreviewContainer>
                       <StyledVideoPlayer controls>
-                        <source src={safeVideoPreviewUrl} type="video/mp4" />
+                        <source src={encodedSafeVideoPreviewUrl} type="video/mp4" />
                         Your browser does not support the video tag.
                       </StyledVideoPlayer>
                     </VideoPreviewContainer>
                   )}
                   
-                  <div style={{ marginTop: safeVideoPreviewUrl ? '1rem' : '0' }}>
+                  <div style={{ marginTop: encodedSafeVideoPreviewUrl ? '1rem' : '0' }}>
                     <div><strong>{t('summaryTitle')}:</strong> {summaryName}</div>
                     {videoTags && videoTags.trim().length > 0 && (
                       <div><strong>{t('customVideoTags')}:</strong> {videoTags}</div>
@@ -1369,15 +1400,16 @@ export default function VideoSummarizeFlow({ onClose }: VideoSummarizeFlowProps)
                         <div style={{ marginTop: '1rem', fontWeight: 600 }}>{t('IngestionSettings')}</div>
                         <div><strong>{t('FramesOverlap')}:</strong> {frameOverlap}</div>
                         <div><strong>{t('MultiFrame')}:</strong> {calculatedMultiFrame}</div>
-                        <div><strong>{t('Chunking Pipeline')}:</strong> {selectorRef?.current?.value ?? ''}</div>
+                        <div><strong>{t('Chunking Pipeline')}:</strong> {selectedEvamPipeline ?? ''}</div>
                         {systemConfig.meta.defaultAudioModel && (
                           <>
                             <div style={{ marginTop: '1rem', fontWeight: 600 }}>{t('AudioSettings')}</div>
                             <div><strong>{t('UseAudio')}:</strong> {audio ? t('yes') : t('no')}</div>
                             <div><strong>{t('AudioModels')}:</strong> {selectedAudioModel || systemConfig.meta.defaultAudioModel}</div>
-                            {audio && <div><strong>{t('UseAudioSummary')}:</strong> {useAudioSummary ? t('yes') : t('no')}</div>}
+                            {audio && <div><strong>{t('UseAudioSummary')}:</strong> {(produceFinalSummary && useAudioSummary) ? t('yes') : t('no')}</div>}
                           </>
                         )}
+                            <div><strong>{t('ProduceFinalSummary')}:</strong> {produceFinalSummary ? t('yes') : t('no')}</div>
                         {(framePrompt !== systemConfig.framePrompt || 
                           mapPrompt !== systemConfig.summaryMapPrompt || 
                           reducePrompt !== systemConfig.summaryReducePrompt || 

@@ -16,11 +16,12 @@ import {
 import { Information } from '@carbon/icons-react';
 import { useTranslation } from 'react-i18next';
 import { useAppSelector, useAppDispatch } from '../../redux/store';
-import { SearchSelector } from '../../redux/search/searchSlice';
+import { LoadTags, SearchSelector } from '../../redux/search/searchSlice';
 import { videosLoad, videosSelector } from '../../redux/video/videoSlice';
 import { Video } from '../../redux/video/video';
 import axios from 'axios';
 import type { AxiosProgressEvent } from 'axios';
+import type { MouseEvent } from 'react';
 import { APP_URL, ASSETS_ENDPOINT } from '../../config';
 import { NotificationSeverity, notify } from '../Notification/notify';
 import { getSafePreviewVideoUrl } from '../../utils/util';
@@ -146,6 +147,7 @@ const SettingsPanel = styled.div`
   width: 100%;
   padding-bottom: 1rem;
   overflow-y: auto;
+  overflow-x: visible;
   max-height: 50vh;
 `;
 
@@ -301,6 +303,18 @@ export default function VideoEmbeddingFlow({ onClose }: VideoEmbeddingFlowProps)
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
 
+  const createLabelWithTooltip = (label: string, tooltipContent: string) => (
+    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      {label}
+      <Toggletip autoAlign>
+        <ToggletipButton label={t('info')}>
+          <Information />
+        </ToggletipButton>
+        <ToggletipContent>{tooltipContent}</ToggletipContent>
+      </Toggletip>
+    </span>
+  );
+
   // API endpoints
   const videoUploadAPi = `${APP_URL}/videos`;
 
@@ -352,6 +366,10 @@ export default function VideoEmbeddingFlow({ onClose }: VideoEmbeddingFlowProps)
     () => getSafePreviewVideoUrl(videoPreviewUrl, ASSETS_ENDPOINT),
     [videoPreviewUrl]
   );
+  const encodedSafeVideoPreviewUrl = useMemo(
+    () => (safeVideoPreviewUrl ? encodeURI(safeVideoPreviewUrl) : null),
+    [safeVideoPreviewUrl]
+  );
 
   const buildSafeAssetVideoUrl = useCallback((video: Video): string | null => {
     const bucket = video.dataStore?.bucket?.trim();
@@ -376,7 +394,8 @@ export default function VideoEmbeddingFlow({ onClose }: VideoEmbeddingFlowProps)
     }
 
     const base = ASSETS_ENDPOINT.replace(/\/$/, '');
-    return `${base}/${bucket}/${encodedPath}`;
+    const assetVideoUrl = `${base}/${bucket}/${encodedPath}`;
+    return getSafePreviewVideoUrl(assetVideoUrl, ASSETS_ENDPOINT);
   }, []);
 
   const resetForm = useCallback(() => {
@@ -566,10 +585,11 @@ export default function VideoEmbeddingFlow({ onClose }: VideoEmbeddingFlowProps)
     }
   };
 
-  const triggerEmbeddings = async (videoId: string) => {
+  const triggerEmbeddings = async (videoId: string, tags?: string) => {
     const api = [videoUploadAPi, 'search-embeddings', videoId].join('/');
+    const body = tags && tags.trim().length > 0 ? { tags } : undefined;
     try {
-      const res = await axios.post<{ status: string; message: string }>(api);
+      const res = await axios.post<{ status: string; message: string }>(api, body);
       return res.data;
     } catch (error) {
       if (axios.isAxiosError(error)) {
@@ -633,11 +653,13 @@ export default function VideoEmbeddingFlow({ onClose }: VideoEmbeddingFlowProps)
       }
 
       setProgressText(t('CreatingEmbeddings'));
-      const embeddingRes = await triggerEmbeddings(videoIdToUse);
+      const embeddingRes = await triggerEmbeddings(videoIdToUse, videoData.tags);
 
       if (embeddingRes.status === 'success') {
         setProgressText(t('allDone'));
         setUploading(false);
+        dispatch(videosLoad());
+        dispatch(LoadTags());
         resetForm();
         notify(t('CreatingEmbeddings') + ' ' + t('success'), NotificationSeverity.SUCCESS);
         if (onClose) {
@@ -759,7 +781,7 @@ export default function VideoEmbeddingFlow({ onClose }: VideoEmbeddingFlowProps)
                       <MainButton 
                         kind="tertiary" 
                         style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', margin: '0 auto' }}
-                        onClick={(e) => {
+                        onClick={(e: MouseEvent<HTMLButtonElement>) => {
                           e.stopPropagation();
                           if (videoPreviewUrlRef.current) {
                             URL.revokeObjectURL(videoPreviewUrlRef.current);
@@ -873,19 +895,7 @@ export default function VideoEmbeddingFlow({ onClose }: VideoEmbeddingFlowProps)
                   />
                 )}
                 <TextInput
-                  labelText={
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      {t('customVideoTags')}
-                      <Toggletip>
-                        <ToggletipButton>
-                          <Information />
-                        </ToggletipButton>
-                        <ToggletipContent>
-                          {t('videoTagsinfo')}
-                        </ToggletipContent>
-                      </Toggletip>
-                    </span>
-                  }
+                  labelText={createLabelWithTooltip(t('customVideoTags'), t('videoTagsinfo'))}
                   onChange={(ev) => {
                     setVideoTags(ev.currentTarget.value);
                   }}
@@ -925,16 +935,16 @@ export default function VideoEmbeddingFlow({ onClose }: VideoEmbeddingFlowProps)
                 }}
               >
                 {/* Video Preview inside the details box */}
-                {safeVideoPreviewUrl && (
+                {encodedSafeVideoPreviewUrl && (
                   <VideoPreviewContainer>
                     <StyledVideoPlayer controls>
-                      <source src={safeVideoPreviewUrl} type="video/mp4" />
+                      <source src={encodedSafeVideoPreviewUrl} type="video/mp4" />
                       Your browser does not support the video tag.
                     </StyledVideoPlayer>
                   </VideoPreviewContainer>
                 )}
                 
-                <div style={{ marginTop: safeVideoPreviewUrl ? '1rem' : '0' }}>
+                <div style={{ marginTop: encodedSafeVideoPreviewUrl ? '1rem' : '0' }}>
                   <div>
                     <strong>{t('videoNameLabel')}:</strong> {displayFileName || '-'}
                   </div>
